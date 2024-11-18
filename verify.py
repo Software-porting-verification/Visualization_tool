@@ -9,7 +9,7 @@
 #
 ####################################################
 
-from flask import Flask,request,abort,render_template,url_for
+from flask import Flask,request,abort,render_template,url_for,send_from_directory
 import os
 import sys
 import shutil
@@ -17,7 +17,7 @@ import glob
 from flask_executor import Executor
 import subprocess
 import threading
-from database import DatabaseConnection
+from database import create_db_connection, write_to_mysql
 # 获取 PerfInstr 目录的绝对路径
 perf_instr_path = os.path.abspath('./PerfInstr')
 sys.path.append(perf_instr_path)
@@ -59,11 +59,15 @@ def mv_dir(directory, pkgName, destination_path):
 def move_and_verify(pkgName,archType,collect_type):
   destination_path = f"{base_path}/{collect_type}_{archType}/{pkgName}"
   directory_to_search = glob.glob(f"{base_path}/obs-workers/{archType}-*/root*/home/abuild/rpmbuild/PERF_TREC")
-  print(f"xxx:{directory_to_search}")
+  result_dir = f"{base_path}/{collect_type}/result_dir"
+
+  if not os.path.exists(result_dir):
+      os.makedirs(result_dir)
 
   if os.path.exists(destination_path):
       shutil.rmtree(destination_path)
   os.makedirs(destination_path)
+  
   mv_dir_result = mv_dir(directory_to_search, pkgName, destination_path)
   
   retMsg = ""
@@ -74,15 +78,16 @@ def move_and_verify(pkgName,archType,collect_type):
           retMsg += f"已收集到以下构架的trace记录：{' '.join(pkg_success_flags[pkgName][collect_type])}\n"
           if len(pkg_success_flags[pkgName][collect_type]) == 2:
               if collect_type == "instr":
-                  executor.submit(perf_func.main,
+                  executor.submit(main,
                                   f"{base_path}/{collect_type}_x86_64/{pkgName}", 
                                   f"{base_path}/{collect_type}_riscv64/{pkgName}",
-                                  pkgName, "./")
+                                  pkgName, result_dir)
+                  write_to_mysql();
               if collect_type == "perf":
-                  executor.submit(perf_func.main,
+                  executor.submit(main,
                                   f"{base_path}/{collect_type}_x86_64/{pkgName}",
                                   f"{base_path}/{collect_type}_riscv64/{pkgName}",
-                                  pkgName, "./")
+                                  pkgName, result_dir)
               retMsg += f"集齐所有trace记录，开始运行检测\n"
               pkg_success_flags[pkgName][collect_type].clear()
   else:
@@ -103,41 +108,42 @@ def collect_trace():
 def restart_verification():
     pkgName = request.args.get('pkgName')
     collect_type = request.args.get('collect_type')
+    result_dir = f"{base_path}/{collect_type}/result_dir"
+
+    if not os.path.exists(result_dir):
+        os.makedirs(result_dir)
 
     x86_64_path = f"{base_path}/{collect_type}_x86_64/{pkgName}"
     riscv64_path = f"{base_path}/{collect_type}_riscv64/{pkgName}"
-    
+ 
     if pkgName is not None and os.path.exists(x86_64_path) and os.path.exists(riscv64_path):
         if collect_type == "instr":
-           executor.submit(perfInstr.main, x86_64_path, riscv64_path, pkgName, "./")
+           future = executor.submit(main, x86_64_path, riscv64_path, pkgName, result_dir)
+           result = future.result();
+           write_to_mysql(conn,cursor,pkgName, result, f"{result_dir}/{pkgName}.html")
            return f"开始重新检测{pkgName}"
         elif collect_type == "perf":
-           executor.submit(perfData.run_verification, conn, cursor, pkgName, x86_64_path, riscv64_path)
+           executor.submit(main, x86_64_path, riscv64_path, pkgName)
            return f"开始重新检测{pkgName}"
    
     return f"参数非法"
 
 @app.route('/show_result_html/')
 def show_result_html():
-   html_file_path = request.args.get('path')  # 从查询参数中获取HTML文件路径
-   print(html_file_path)
-   return render_template(html_file_path)
+    path = request.args.get('path')
+    # 获取绝对路径
+    safe_path = os.path.abspath(path)
+    # 提取目录和文件名
+    directory = os.path.dirname(safe_path)  # 获取文件所在目录
+    filename = os.path.basename(safe_path)  # 获取文件名
 
-
+    return send_from_directory(directory, filename)
 
 if __name__ == '__main__':
     if len(sys.argv) != 6:
        print("Usage:sudo python request.py root_dir host user passwd port")
        sys.exit(1)
     base_path = sys.argv[1]
-    host = sys.argv[2]
-    user = sys.argv[3]
-    passwd = sys.argv[4]
-    port = sys.argv[5]
     # 初始化数据库连接
-    #conn,cursor = create_db_connection()
-    
-    db = DatabaseConnection(host,user,passwd,'test')
-    print(port)
-    conn,cursor = db.get_connection()
+    conn,cursor = create_db_connection()
     app.run(host='0.0.0.0', port=8088, debug=True)
