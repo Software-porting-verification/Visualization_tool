@@ -1,0 +1,3 @@
+[submodule "PerfInstr"]
+	path = PerfInstr
+	url = git@github.com:Software-porting-verification/PerfInstr.git
