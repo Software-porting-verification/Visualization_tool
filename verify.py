@@ -48,7 +48,12 @@ def mv_dir(directory, pkgName, destination_path):
         pkgName_file_path = find_pkgName_file(source_directory, pkgName)
         if pkgName_file_path:
             for dir in os.listdir(pkgName_file_path):
-                print(f"dir: {dir}")
+                # 检查目录是否为空
+                dir_path = os.path.join(pkgName_file_path, dir)
+                if os.path.isdir(dir_path) and not os.listdir(dir_path):
+                    print(f"Directory {dir_path} is empty.")
+                else:
+                    print(f"Directory {dir_path} is not empty.")
                 shutil.move(os.path.join(pkgName_file_path, dir),
                             destination_path)
             file_found = True
@@ -77,18 +82,22 @@ def move_and_verify(pkgName,archType,collect_type):
           retMsg = f"{archType} 架构文件移动成功\n"
           retMsg += f"已收集到以下构架的trace记录：{' '.join(pkg_success_flags[pkgName][collect_type])}\n"
           if len(pkg_success_flags[pkgName][collect_type]) == 2:
+              retMsg += f"集齐所有trace记录，开始运行检测\n"
               if collect_type == "instr":
-                  executor.submit(main,
+                  future = executor.submit(main,
                                   f"{base_path}/{collect_type}_x86_64/{pkgName}", 
                                   f"{base_path}/{collect_type}_riscv64/{pkgName}",
                                   pkgName, result_dir)
-                  write_to_mysql();
+                  result = future.result();
+                  write_to_mysql(conn,cursor,pkgName, result, f"{result_dir}/{pkgName}.html")
+       
               if collect_type == "perf":
-                  executor.submit(main,
+                  future = executor.submit(main,
                                   f"{base_path}/{collect_type}_x86_64/{pkgName}",
                                   f"{base_path}/{collect_type}_riscv64/{pkgName}",
                                   pkgName, result_dir)
-              retMsg += f"集齐所有trace记录，开始运行检测\n"
+                  result = future.result();
+                  write_to_mysql(conn,cursor,pkgName, result, f"{result_dir}/{pkgName}.html")
               pkg_success_flags[pkgName][collect_type].clear()
   else:
       retMsg = f"文件移动失败：文件未找到\n"
@@ -121,10 +130,12 @@ def restart_verification():
            future = executor.submit(main, x86_64_path, riscv64_path, pkgName, result_dir)
            result = future.result();
            write_to_mysql(conn,cursor,pkgName, result, f"{result_dir}/{pkgName}.html")
-           return f"开始重新检测{pkgName}"
+           return f"{pkgName}检测完成"
         elif collect_type == "perf":
-           executor.submit(main, x86_64_path, riscv64_path, pkgName)
-           return f"开始重新检测{pkgName}"
+           future = executor.submit(main, x86_64_path, riscv64_path, pkgName, result_dir)
+           result = future.result();
+           write_to_mysql(conn,cursor,pkgName, result, f"{result_dir}/{pkgName}.html")
+           return f"{pkgName}检测完成"
    
     return f"参数非法"
 

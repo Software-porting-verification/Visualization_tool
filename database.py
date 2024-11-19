@@ -22,7 +22,7 @@ def create_db_connection():
                 CREATE TABLE IF NOT EXISTS Instr_reports (
                     id int AUTO_INCREMENT PRIMARY KEY,
                     name VARCHAR(255) UNIQUE,
-                    number int,
+                    number int DEFAULT 0,
                     port int,
                     ip VARCHAR(255),
                     report_dir VARCHAR(255)
@@ -52,7 +52,7 @@ def get_connection(self):
 
 def write_to_mysql(conn,cursor,pkgName,result_count,result_dir):
     try:
-       cursor.execute('INSERT INTO Instr_reports (name,number,port,ip,report_dir) VALUES (%s,%s,%s,%s,%s) ON DUPLICATE KEY UPDATE number=%s,port=%s,ip=%s,report_dir=%s',(pkgName,result_count,port,host,result_dir,result_count,port,host,result_dir))
+       cursor.execute('INSERT INTO Instr_reports (name,number,port,ip,report_dir) VALUES (%s,IFNULL(%s, 0),%s,%s,%s) ON DUPLICATE KEY UPDATE number=IFNULL(%s, 0),port=%s,ip=%s,report_dir=%s',(pkgName,result_count,port,host,result_dir,result_count,port,host,result_dir))
        conn.commit()  # Don't forget to commit the transaction
     except pymysql.MySQLError as e:
         print(f"Error executing query: {e}")
